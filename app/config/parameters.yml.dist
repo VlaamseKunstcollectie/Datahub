@@ -3,6 +3,9 @@
 # http://symfony.com/doc/current/best_practices/configuration.html#infrastructure-related-configuration
 parameters:
 
+    # URL of the remote OAI-PMH endpoint for metadata harvesting
+    remote_datahub_url: 'http://datahub.vlaamsekunstcollectie.be/oai'
+
     # Mailer
     mailer_transport:  smtp
     mailer_host:       127.0.0.1

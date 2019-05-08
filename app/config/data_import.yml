@@ -1,0 +1,39 @@
+services:
+    app.command.import_data_command:
+        class: DataHub\Command\FillLocalDatahubCommand
+        tags:
+            -  { name: console.command }
+
+parameters:
+  datahub.namespace: 'lido'
+  datahub.metadataprefix: 'oai_lido'
+  csv_folder: '../imagehub-fixes/csv/'
+  record_ids_csv_file: '200LIDOfiles.csv'
+
+  data_definition:
+      # Those with a term defined need to reduced to just 1, others are to simply be translated.
+      # 'term' can only contain alphanumeric characters and and slashes (/) by which they are delimited. They are used to create new XML child element.
+      title:
+          xpath: 'descriptiveMetadata[@xml:lang="{language}"]/objectIdentificationWrap'
+          term: 'titleWrap/titleSet/appellationValue'
+          attributes:
+            pref: 'preferred'
+          csv_file: '200titles.csv'
+      short_description:
+          xpath: 'descriptiveMetadata[@xml:lang="{language}"]/objectIdentificationWrap'
+          term: 'objectDescriptionWrap/objectDescriptionSet/descriptiveNoteValue'
+          csv_file: '200descriptions.csv'
+      provider:
+          xpath: 'administrativeMetadata[@xml:lang="{language}"]/recordWrap/recordSource/legalBodyName/appellationValue'
+          csv_file: 'legalbodynametranslations.csv'
+      period:
+          xpath: 'descriptiveMetadata[@xml:lang="{language}"]/eventWrap/eventSet/event[eventType/term="production"]/periodName/term'
+          csv_file: 'periodtranslations.csv'
+
+  object_identification_order:
+      - titleWrap
+      - inscriptionsWrap
+      - repositoryWrap
+      - displayStateEditionWrap
+      - objectDescriptionWrap
+      - objectMeasurementsWrap
