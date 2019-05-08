@@ -31,61 +31,31 @@ This project requires following dependencies:
 
 ## Install
 
-Via Git:
-
-``` bash
-$ git clone https://github.com/thedatahub/Datahub.git datahub
-$ cd datahub
-$ composer install # Composer will ask you to fill in any missing parameters 
-  before it continues
-```
-
-You will be asked to configure the connection to your MongoDB database. You 
-will need to provide these details:
-
-* The connection to your MongoDB instance (i.e. mongodb://127.0.0.1:27017)
-* The username of the user (i.e. datahub)
-* The password of the user
-* The database where your data will persist (i.e. datahub)
-
-Before you install, ensure that you have a running MongoDB instance, and you 
-have created a user with the right permissions. From the 
-[Mongo shell]https://docs.mongodb.com/getting-started/shell/client/) run these
-commands to create the required artefacts in MongoDB:
-
-```
-> use datahub
-> db.createUser(
+- If you want to run a datahub instance in a virtual box:
+    - Install your (virtualbox)[https://github.com/VlaamseKunstcollectie/Imagehub-box].
+    - git clone the (datahub)[https://github.com/VlaamseKunstcollectie/datahub] into your shared vagrant folder. 
+- while in the Imagehub-Box directory, `vagrant ssh` in to your box, and navigate to `/vagrant/datahub`  
+- `composer install` in the datahub box
+- get into mongo shell by typing `mongo`. If you get a LANG_LC error, then:
+	- `export LC_ALL=C`
+- once you're in your mongo shell you need to create a dbuser for the datahub that will be used to have vagrant be authenticated while trying to create the Datahub
+- `db.createUser(
    {
      user: "datahub",
      pwd: "password",
      roles: [ "readWrite", "dbAdmin" ]
    }
-)
-```
-
-The configuration parameters will be stored in `app/config/parameters.yml`.  
-You'll need to run an initiial one-time setup script, which will scaffold the 
-database structure, generate CSS assets and create the application 'admin' user.
-
-``` bash
-$ app/console app:setup
-$ app/console doctrine:mongodb:fixtures:load --append
-```
-
-If you want to run the datahub for testing or development purposes, execute 
-this command:
-
-``` bash
-$ app/console server:run
-```
-
-Use a browser and Navigate to [http://127.0.0.1:8000](http://127.0.0.1:8000). 
-You should now see the welcome screen.
-
-Refer to the [Symfony setup documentation](https://symfony.com/doc/current/setup/web_server_configuration.html) 
-to complete your installation using a fully featured web server to make your 
-installation operational in a production environment.
+)`
+- if you get an authentication error while trying to set up the user above, first log in as admin. To do so, log in in your mongo shell with the credentials given in ansible (ansible/group_vars/all/mongo.yml), e.g. `-u SiteRootAdmin -p passw0rd -authenticationDatabase admin`
+- run `app/console app:setup`
+- configure swiftmailer:
+	- go to config_dev.yml in your datahub folder
+	- edit the swiftmailer info  at the bottom of that file
+	- you need to put an email access token in the 'password' field for switfmailer. to get an access token for a gmail account, go to [your security settings in Google](https://myaccount.google.com/security), and under the 'Signing in to Google' card you need to click on 'App password'.  enter your google password if prompted and then create a new app password, for the app 'Mail'. You can choose to enter 'datahub' as its device, so you can remember what this app password is for again. You'll receive a password combination, which you need to enter in the config_dev folder. It's normal that there are no spaces in the password. 
+- surf to datahub.box, you should get a login screen.
+	- If you get a connectionexception make sure the datahub user and password you made in shell is the same as parameters.yml
+	- create an admin account and enter the email address you just gave access to in config_dev. You should get an email that says 'welcome X!' and contains a one-time login. Follow the URL and you'll be logged in to your admin account. Go to your admin profile settings in the top right and change your password to something you will remember. 
+- you should now have a working datahub instance with an admin user!
 
 ## Usage
 
