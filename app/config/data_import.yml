@@ -17,12 +17,16 @@ parameters:
           xpath: 'descriptiveMetadata[@xml:lang="{language}"]/objectIdentificationWrap'
           term: 'titleWrap/titleSet/appellationValue'
           attributes:
-            pref: 'preferred'
+            lido:pref: 'preferred'
+            xml:lang: '{language}'
           csv_file: '200titles.csv'
       short_description:
           xpath: 'descriptiveMetadata[@xml:lang="{language}"]/objectIdentificationWrap'
           term: 'objectDescriptionWrap/objectDescriptionSet/descriptiveNoteValue'
           csv_file: '200descriptions.csv'
+      storage_institution:
+          xpath: 'descriptiveMetadata[@xml:lang="{language}"]/objectIdentificationWrap/repositoryWrap/repositorySet/repositoryName/legalBodyName/appellationValue'
+          csv_file: 'legalbodynametranslations.csv'
       provider:
           xpath: 'administrativeMetadata[@xml:lang="{language}"]/recordWrap/recordSource/legalBodyName/appellationValue'
           csv_file: 'legalbodynametranslations.csv'

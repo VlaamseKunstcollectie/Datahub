@@ -283,9 +283,15 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                                 $domNode = $newEle;
                             }
 
-                            // Fill up the last child with the applicable value
+                            // Set the correct value
                             $domNode->nodeValue = $newValue;
 
+                            // Set attributes if applicable
+                            if(array_key_exists('attributes', $value)) {
+                                foreach ($value['attributes'] as $key => $value) {
+                                    $domNode->setAttribute($key, str_replace('{language}', $language, $value));
+                                }
+                            }
                         }
                     } else {
                         // Translate all occurrences
@@ -297,7 +303,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                                 foreach($translation as $trans) {
                                     if ($trans == $domNode->nodeValue) {
 
-                                        // Set language attribute
+                                        // Change language attribute if present
                                         $oldLang = $domNode->getAttribute('xml:lang');
                                         if($oldLang) {
                                             if($oldLang != null && !empty($oldLang)) {
