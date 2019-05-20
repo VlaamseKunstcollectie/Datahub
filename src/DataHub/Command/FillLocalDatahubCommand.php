@@ -44,11 +44,11 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         $metadataPrefix = $this->getContainer()->getParameter('datahub.metadataprefix');
         $dataDef = $this->getContainer()->getParameter('data_definition');
 
-        // Grab the record ID's we need to fetch from the remote Datahub
+        // Fetch the record ID's for the records that we have to import from the remote Datahub
         $csvFolder = $this->getContainer()->getParameter('csv_folder');
         $recordInfo = $this->readRecordIdsFromCsv($csvFolder . $this->getContainer()->getParameter('record_ids_csv_file'));
 
-        // Fetch all translations of all the fields to alter the lido data
+        // Fetch all translations of all the fields to alter or translate the lido data
         $translations = array();
         foreach ($dataDef as $key => $value) {
             $translations[$key] = $this->readTranslationsFromCsv($csvFolder . $value['csv_file']);
@@ -83,7 +83,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 $data = $rec->GetRecord->record->metadata->children($namespace, true);
 
                 //Fetch the data from this record based on data_definition in data_import.yml
-                $newData = $this->alterData($dataDef, $namespace, $data, $record['Work PID'], $languages, $translations);
+                $newData = $this->alterData($dataDef, $namespace, $data, $record['Work PID'], $languages, $translations, $record['copyright status'], $record['LUKAS photo id']);
 
                 $doc = new \DOMDocument();
                 $doc->formatOutput = true;
@@ -114,6 +114,9 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         if (($handle = fopen($csvFile, "r")) !== false) {
             $columns = fgetcsv($handle, 1000, ",");
             while (($row = fgetcsv($handle, 1000, ",")) !== false) {
+                if(count($columns) != count($row)) {
+                    echo 'Wrong column count: should be ' . count($columns) . ', is ' . count($row) . ' at row ' . $i;
+                }
                 $csv[$i] = array_combine($columns, $row);
                 $i++;
             }
@@ -148,7 +151,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
     }
 
     // Remove old nodes and insert new nodes, or translate nodes where applicable
-    private function alterData($dataDef, $namespace, $data, $workPid, $languages, $translations)
+    private function alterData($dataDef, $namespace, $data, $workPid, $languages, $translations, $rightsStatus, $photoId)
     {
         // Create a new DOMDocument based on the data we retrieved from the remote Datahub
         $domDoc = new DOMDocument;
@@ -170,6 +173,51 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         foreach($defaultAdministrativeMetadatas as $def) {
             $defaultAdministrativeMetadata = $def;
         }
+
+        // Add photo id and copyright status to the administrative metadata
+        $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
+        $defaultAdministrativeMetadata->appendChild($resourceSet);
+        $resourceId = $domDoc->createElement($namespace . ':resourceID');
+        $resourceId->setAttribute($namespace . ':type', 'local');
+        $resourceId->nodeValue = $photoId;
+        $resourceSet->appendChild($resourceId);
+        $resourceSource = $domDoc->createElement($namespace . ':resourceSource');
+        $resourceSource->setAttribute($namespace . ':type', 'holder of image');
+        $resourceSet->appendChild($resourceSource);
+        $legalBodyName = $domDoc->createElement($namespace . ':legalBodyName');
+        $resourceSource->appendChild($legalBodyName);
+        $appellationValue = $domDoc->createElement($namespace . ':appellationValue');
+        // Hardcoded value
+        $appellationValue->nodeValue = 'Lukas, Arts in Flanders';
+        $legalBodyName->appendChild($appellationValue);
+        $rightsResource = $domDoc->createElement($namespace . ':rightsResource');
+        $resourceSet->appendChild($rightsResource);
+        $rightsType = $domDoc->createElement($namespace . ':rightsType');
+        $rightsResource->appendChild($rightsType);
+        $conceptId = $domDoc->createElement($namespace . ':conceptID');
+        $conceptId->setAttribute($namespace . ':type', 'URI');
+        $conceptId->nodeValue = $rightsStatus;
+        $term = $domDoc->createElement($namespace . ':term');
+        // Three possible hardcoded values
+        switch($rightsStatus) {
+            case "https://creativecommons.org/publicdomain/zero/1.0/":
+                $conceptId->setAttribute($namespace . ':source', 'Creative Commons');
+                $term->nodeValue = 'CC0';
+                break;
+            case "http://rightsstatements.org/vocab/InC/1.0/":
+                $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
+                $term->nodeValue = 'InC';
+                break;
+            case "http://rightsstatements.org/vocab/CNE/1.0/":
+                $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
+                $term->nodeValue = 'CNE';
+                break;
+            default:
+                echo 'Error: invalid copyright status "' . $rightsStatus . '"' . PHP_EOL;
+                break;
+        }
+        $rightsType->appendChild($conceptId);
+        $rightsType->appendChild($term);
 
         foreach ($languages as $language) {
 
@@ -198,9 +246,9 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 $makeNew = true;
             }
             if($makeNew) {
-                $newNode = $defaultAdministrativeMetadata->cloneNode(true);
-                $newNode->setAttribute('xml:lang', $language);
-                $domDoc->documentElement->appendChild($newNode);
+                $administrativeMetadata = $defaultAdministrativeMetadata->cloneNode(true);
+                $administrativeMetadata->setAttribute('xml:lang', $language);
+                $domDoc->documentElement->appendChild($administrativeMetadata);
             }
 
             foreach ($dataDef as $key => $value) {
@@ -209,7 +257,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 $domNodes = $xpath->query($query);
                 if ($domNodes) {
                     if (array_key_exists('term', $value)) {
-                        // Remove all child nodes and replace with one new one
+                        // Remove all child nodes and replace with a new one containing the correctly translated data
 
                         $children = explode('/', $value['term']);
                         foreach ($domNodes as $domNode) {
@@ -253,6 +301,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                             $newEle = $domDoc->createElement($namespace . ':' . $children[0]);
                             $added = false;
                             if (count($before) > 0) {
+                                // Loop through all child nodes to find the right index where to insert it
                                 foreach ($childNodes as $childNode) {
                                     $insert = false;
                                     foreach ($before as $bef) {
