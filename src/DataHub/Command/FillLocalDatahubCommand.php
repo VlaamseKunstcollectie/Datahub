@@ -215,6 +215,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 $newNode = $defaultDescriptiveMetadata->cloneNode(true);
                 $newNode->setAttribute('xml:lang', $language);
                 $domDoc->documentElement->insertBefore($newNode, $defaultAdministrativeMetadata);
+                $this->translateAatTerms($workPid, $namespace, $language, $newNode);
             }
 
             // Clone the administrative metadata element if it is not present yet for this language
@@ -262,6 +263,8 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                                 continue;
                             if(empty($newValue))
                                 continue;
+
+                            $newValue = str_replace('\\', '', $newValue);
 
 
                             // Determine order in which the new node needs to be inserted
@@ -535,6 +538,48 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             }
             $rightsType->appendChild($conceptId);
             $rightsType->appendChild($term);
+        }
+    }
+
+    private function translateAatTerms($workPid, $namespace, $language, $node)
+    {
+        if($node->childNodes != null) {
+            if($node->childNodes->length > 0) {
+                $aatId = null;
+                $aatTermNode = null;
+                foreach($node->childNodes as $childNode) {
+                    $this->translateAatTerms($workPid, $namespace, $language, $childNode);
+
+                    if($aatId == null && $childNode->nodeName == $namespace . ':conceptID') {
+                        if($childNode->getAttribute($namespace . ':source') == 'AAT' && $childNode->getAttribute($namespace . ':pref') == 'alternate') {
+                            $aatId = $childNode->nodeValue;
+                        }
+                    }
+                    else if($aatTermNode == null && $childNode->nodeName == $namespace . ':term') {
+                        if($childNode->getAttribute($namespace . ':pref') == 'alternate') {
+                            $aatTermNode = $childNode;
+                        }
+                    }
+                }
+                if($aatId != null && $aatTermNode != null) {
+                    $ch = curl_init('vocab.getty.edu/download/rdf?uri=' . $aatId . '.rdf');
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    $xmlData = curl_exec($ch);
+                    curl_close($ch);
+
+                    $domDoc = new DOMDocument;
+                    $domDoc->loadXML($xmlData);
+                    $xpath = new DOMXPath($domDoc);
+                    $domNodes = $xpath->query('/rdf:RDF/gvp:Subject/rdfs:label[@xml:lang="' . $language . '"]');
+                    if ($domNodes) {
+                        foreach ($domNodes as $domNode) {
+                            $aatTermNode->nodeValue = $domNode->nodeValue;
+                            $aatTermNode->setAttribute('xml:lang', $language);
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 }
