@@ -77,7 +77,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         foreach($recordInfo as $record) {
 
             try {
-                $dataPid = $record['Data URN'];
+                $dataPid = $record['dataPid'];
 
                 $recordRepository = $this->getContainer()->get('datahub.resource_api.repository.default');
                 $oldRecord = $recordRepository->findOneByProperty('recordIds', $dataPid);
@@ -89,7 +89,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     $data = $rec->GetRecord->record->metadata->children($namespace, true);
 
                     //Fetch the data from this record based on data_definition in data_import.yml
-                    $newData = $this->alterData($dataDef, $namespace, $data, $record['Work PID'], $languages, $translations, $record['copyright status'], $record['LUKAS photo id']);
+                    $newData = $this->alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $record['workPid'], $record['isPartOf'], $record['hasPart'], $record['copyrightStatus'], $record['lukasPhotoId']);
 
                     $doc = new \DOMDocument();
                     $doc->formatOutput = true;
@@ -129,9 +129,9 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
 
                 // Merge copyright statuses and photo ID's for lines with the same work PID
                 for($j = 0; $j < $i; $j++) {
-                    if($csv[$j]['Work PID'] == $line['Work PID']) {
-                        $csv[$j]['copyright status'] = $csv[$j]['copyright status'] . ' ; ' . $line['copyright status'];
-                        $csv[$j]['LUKAS photo id'] = $csv[$j]['LUKAS photo id'] . ' ; ' . $line['LUKAS photo id'];
+                    if($csv[$j]['workPid'] == $line['workPid']) {
+                        $csv[$j]['copyrightStatus'] = $csv[$j]['copyrightStatus'] . ' ; ' . $line['copyrightStatus'];
+                        $csv[$j]['lukasPhotoId'] = $csv[$j]['lukasPhotoId'] . ' ; ' . $line['lukasPhotoId'];
                         $add = false;
                         break;
                     }
@@ -173,7 +173,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
     }
 
     // Remove old nodes and insert new nodes, or translate nodes where applicable
-    private function alterData($dataDef, $namespace, $data, $workPid, $languages, $translations, $rightsStatusesS, $photoIdsS)
+    private function alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $workPid, $isPartsOfLine, $hasPartsLine, $rightsStatusesLine, $photoIdsLine)
     {
         // Create a new DOMDocument based on the data we retrieved from the remote Datahub
         $domDoc = new DOMDocument;
@@ -189,6 +189,104 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultDescriptiveMetadata = $def;
         }
 
+        $relatedWorksWrap = null;
+        if(!empty($isPartsOfLine) || !empty($hasPartsLine)) {
+            $objectRelationWrap = $domDoc->createElement($namespace . ':objectRelationWrap');
+            $defaultDescriptiveMetadata->appendChild($objectRelationWrap);
+            $relatedWorksWrap = $domDoc->createElement($namespace . ':relatedWorksWrap');
+            $objectRelationWrap->appendChild($relatedWorksWrap);
+        }
+
+        if(!empty($isPartsOfLine)) {
+            $isPartsOf = explode(' ; ', $isPartsOfLine);
+            foreach($isPartsOf as $isPartOf) {
+                $dataPid = null;
+                foreach($recordInfo as $otherRecord) {
+                    if($otherRecord['workPid'] == $isPartOf) {
+                        $dataPid = $otherRecord['dataPid'];
+                        break;
+                    }
+                }
+                if($dataPid == null) {
+                    echo 'Error: parent of ' . $workPid . ' with work PID ' . $isPartOf . ' not found!' . PHP_EOL;
+                } else {
+                    $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
+                    $relatedWorksWrap->appendChild($relatedWorkSet);
+                    $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
+                    $relatedWorkSet->appendChild($relatedWork);
+                    $object = $domDoc->createElement($namespace . ':object');
+                    $relatedWork->appendChild($object);
+                    $objectID = $domDoc->createElement($namespace . ':objectID');
+                    $expl = explode(':', $dataPid);
+                    $objectID->setAttribute($namespace . ':source', '');
+                    $objectID->setAttribute($namespace . ':type', 'local');
+                    $objectID->nodeValue = $expl[count($expl) - 1];
+                    $object->appendChild($objectID);
+                    $objectID = $domDoc->createElement($namespace . ':objectID');
+                    $objectID->setAttribute($namespace . ':type', 'oai');
+                    $objectID->nodeValue = $dataPid;
+                    $object->appendChild($objectID);
+                    $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
+                    $relatedWorkSet->appendChild($relatedWorkRelType);
+                    $conceptId = $domDoc->createElement($namespace . ':conceptID');
+                    $conceptId->setAttribute($namespace . ':type', 'URI');
+                    // Hardcoded value
+                    $conceptId->nodeValue = 'http://purl.org/dc/terms/isPartOf';
+                    $relatedWorkRelType->appendChild($conceptId);
+                    $term = $domDoc->createElement($namespace . ':term');
+                    $term->setAttribute('xml:lang', 'en');
+                    // Hardcoded value
+                    $term->nodeValue = 'Is Part Of';
+                    $relatedWorkRelType->appendChild($term);
+                }
+            }
+        }
+
+        if(!empty($hasPartsLine)) {
+            $hasParts = explode(' ; ', $hasPartsLine);
+            foreach($hasParts as $hasPart) {
+                $dataPid = null;
+                foreach($recordInfo as $otherRecord) {
+                    if($otherRecord['workPid'] == $hasPart) {
+                        $dataPid = $otherRecord['dataPid'];
+                        break;
+                    }
+                }
+                if($dataPid == null) {
+                    echo 'Error: child of ' . $workPid . ' with work PID ' . $hasPart . ' not found!' . PHP_EOL;
+                } else {
+                    $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
+                    $relatedWorksWrap->appendChild($relatedWorkSet);
+                    $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
+                    $relatedWorkSet->appendChild($relatedWork);
+                    $object = $domDoc->createElement($namespace . ':object');
+                    $relatedWork->appendChild($object);
+                    $objectID = $domDoc->createElement($namespace . ':objectID');
+                    $expl = explode(':', $dataPid);
+                    $objectID->setAttribute($namespace . ':source', '');
+                    $objectID->setAttribute($namespace . ':type', 'local');
+                    $objectID->nodeValue = $expl[count($expl) - 1];
+                    $object->appendChild($objectID);
+                    $objectID = $domDoc->createElement($namespace . ':objectID');
+                    $objectID->setAttribute($namespace . ':type', 'oai');
+                    $objectID->nodeValue = $dataPid;
+                    $object->appendChild($objectID);
+                    $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
+                    $relatedWorkSet->appendChild($relatedWorkRelType);
+                    $conceptId = $domDoc->createElement($namespace . ':conceptID');
+                    $conceptId->setAttribute($namespace . ':type', 'URI');
+                    // Hardcoded value
+                    $conceptId->nodeValue = 'http://purl.org/dc/terms/hasPart';
+                    $relatedWorkRelType->appendChild($conceptId);
+                    $term = $domDoc->createElement($namespace . ':term');
+                    $term->setAttribute('xml:lang', 'en');
+                    // Hardcoded value
+                    $term->nodeValue = 'Has Part';
+                    $relatedWorkRelType->appendChild($term);
+                }
+            }
+        }
+
         $query = 'descendant::lido:administrativeMetadata';
         $defaultAdministrativeMetadata = null;
         $defaultAdministrativeMetadatas = $xpath->query($query);
@@ -196,15 +294,15 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultAdministrativeMetadata = $def;
         }
 
-        $rightsStatuses = explode(' ; ', $rightsStatusesS);
-        $photoIds = explode(' ; ', $photoIdsS);
+        $rightsStatuses = explode(' ; ', $rightsStatusesLine);
+        $photoIds = explode(' ; ', $photoIdsLine);
         if(count($rightsStatuses) != count($photoIds)) {
             echo 'Error: copyright status count (' . count($rightsStatuses) . ') and photo id count (' . count($photoIds) . ') do not match!' . PHP_EOL;
             return $domDoc;
         }
 
+        // Add photo id('s) and copyright status(es) to the administrative metadata
         for($i = 0; $i < count($rightsStatuses); $i++) {
-            // Add photo id and copyright status to the administrative metadata
             $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
             $defaultAdministrativeMetadata->appendChild($resourceSet);
             $resourceId = $domDoc->createElement($namespace . ':resourceID');
