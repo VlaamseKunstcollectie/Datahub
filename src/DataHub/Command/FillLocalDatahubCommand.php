@@ -77,34 +77,41 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         foreach($recordInfo as $record) {
 
             try {
-                $datUrn = $record['Data URN'];
-                $rec = $myEndpoint->getRecord($datUrn, $metadataPrefix);
+                $dataPid = $record['Data URN'];
 
-                $data = $rec->GetRecord->record->metadata->children($namespace, true);
+                $recordRepository = $this->getContainer()->get('datahub.resource_api.repository.default');
+                $oldRecord = $recordRepository->findOneByProperty('recordIds', $dataPid);
+                if ($oldRecord instanceof Record) {
+                    echo 'Record with ID ' . $dataPid . ' already exists.' . PHP_EOL;
+                } else {
+                    $rec = $myEndpoint->getRecord($dataPid, $metadataPrefix);
 
-                //Fetch the data from this record based on data_definition in data_import.yml
-                $newData = $this->alterData($dataDef, $namespace, $data, $record['Work PID'], $languages, $translations, $record['copyright status'], $record['LUKAS photo id']);
+                    $data = $rec->GetRecord->record->metadata->children($namespace, true);
 
-                $doc = new \DOMDocument();
-                $doc->formatOutput = true;
-                $doc->loadXML($newData);
+                    //Fetch the data from this record based on data_definition in data_import.yml
+                    $newData = $this->alterData($dataDef, $namespace, $data, $record['Work PID'], $languages, $translations, $record['copyright status'], $record['LUKAS photo id']);
 
-                $doc->getElementsByTagName("lidoRecID")->item(0)->nodeValue = $datUrn;
-                $raw = $doc->saveXML();
+                    $doc = new \DOMDocument();
+                    $doc->formatOutput = true;
+                    $doc->loadXML($newData);
 
-                $record = new Record();
-                $record->setRecordIds(array($datUrn));
-                $record->setObjectIds(array());
-                $record->setRaw($raw);
+                    $doc->getElementsByTagName("lidoRecID")->item(0)->nodeValue = $dataPid;
+                    $raw = $doc->saveXML();
 
-                $manager = $this->getContainer()->get('doctrine_mongodb')->getManager();
-                $manager->persist($record);
+                    $record = new Record();
+                    $record->setRecordIds(array($dataPid));
+                    $record->setObjectIds(array());
+                    $record->setRaw($raw);
+
+                    $manager = $this->getContainer()->get('doctrine_mongodb')->getManager();
+                    $manager->persist($record);
+                    $manager->flush();
+                }
             }
             catch(OaipmhException $e) {
                 echo $e->getMessage() . PHP_EOL;
             }
         }
-        $manager->flush();
     }
 
     private function readRecordIdsFromCsv($csvFile)
@@ -117,11 +124,26 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 if(count($columns) != count($row)) {
                     echo 'Wrong column count: should be ' . count($columns) . ', is ' . count($row) . ' at row ' . $i;
                 }
-                $csv[$i] = array_combine($columns, $row);
-                $i++;
+                $line = array_combine($columns, $row);
+                $add = true;
+
+                // Merge copyright statuses and photo ID's for lines with the same work PID
+                for($j = 0; $j < $i; $j++) {
+                    if($csv[$j]['Work PID'] == $line['Work PID']) {
+                        $csv[$j]['copyright status'] = $csv[$j]['copyright status'] . ' ; ' . $line['copyright status'];
+                        $csv[$j]['LUKAS photo id'] = $csv[$j]['LUKAS photo id'] . ' ; ' . $line['LUKAS photo id'];
+                        $add = false;
+                        break;
+                    }
+                }
+                if($add) {
+                    $csv[$i] = $line;
+                    $i++;
+                }
             }
             fclose($handle);
         }
+
         return $csv;
     }
 
@@ -151,7 +173,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
     }
 
     // Remove old nodes and insert new nodes, or translate nodes where applicable
-    private function alterData($dataDef, $namespace, $data, $workPid, $languages, $translations, $rightsStatus, $photoId)
+    private function alterData($dataDef, $namespace, $data, $workPid, $languages, $translations, $rightsStatusesS, $photoIdsS)
     {
         // Create a new DOMDocument based on the data we retrieved from the remote Datahub
         $domDoc = new DOMDocument;
@@ -174,50 +196,59 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultAdministrativeMetadata = $def;
         }
 
-        // Add photo id and copyright status to the administrative metadata
-        $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
-        $defaultAdministrativeMetadata->appendChild($resourceSet);
-        $resourceId = $domDoc->createElement($namespace . ':resourceID');
-        $resourceId->setAttribute($namespace . ':type', 'local');
-        $resourceId->nodeValue = $photoId;
-        $resourceSet->appendChild($resourceId);
-        $resourceSource = $domDoc->createElement($namespace . ':resourceSource');
-        $resourceSource->setAttribute($namespace . ':type', 'holder of image');
-        $resourceSet->appendChild($resourceSource);
-        $legalBodyName = $domDoc->createElement($namespace . ':legalBodyName');
-        $resourceSource->appendChild($legalBodyName);
-        $appellationValue = $domDoc->createElement($namespace . ':appellationValue');
-        // Hardcoded value
-        $appellationValue->nodeValue = 'Lukas, Arts in Flanders';
-        $legalBodyName->appendChild($appellationValue);
-        $rightsResource = $domDoc->createElement($namespace . ':rightsResource');
-        $resourceSet->appendChild($rightsResource);
-        $rightsType = $domDoc->createElement($namespace . ':rightsType');
-        $rightsResource->appendChild($rightsType);
-        $conceptId = $domDoc->createElement($namespace . ':conceptID');
-        $conceptId->setAttribute($namespace . ':type', 'URI');
-        $conceptId->nodeValue = $rightsStatus;
-        $term = $domDoc->createElement($namespace . ':term');
-        // Three possible hardcoded values
-        switch($rightsStatus) {
-            case "https://creativecommons.org/publicdomain/zero/1.0/":
-                $conceptId->setAttribute($namespace . ':source', 'Creative Commons');
-                $term->nodeValue = 'CC0';
-                break;
-            case "http://rightsstatements.org/vocab/InC/1.0/":
-                $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
-                $term->nodeValue = 'InC';
-                break;
-            case "http://rightsstatements.org/vocab/CNE/1.0/":
-                $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
-                $term->nodeValue = 'CNE';
-                break;
-            default:
-                echo 'Error: invalid copyright status "' . $rightsStatus . '"' . PHP_EOL;
-                break;
+        $rightsStatuses = explode(' ; ', $rightsStatusesS);
+        $photoIds = explode(' ; ', $photoIdsS);
+        if(count($rightsStatuses) != count($photoIds)) {
+            echo 'Error: copyright status count (' . count($rightsStatuses) . ') and photo id count (' . count($photoIds) . ') do not match!' . PHP_EOL;
+            return $domDoc;
         }
-        $rightsType->appendChild($conceptId);
-        $rightsType->appendChild($term);
+
+        for($i = 0; $i < count($rightsStatuses); $i++) {
+            // Add photo id and copyright status to the administrative metadata
+            $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
+            $defaultAdministrativeMetadata->appendChild($resourceSet);
+            $resourceId = $domDoc->createElement($namespace . ':resourceID');
+            $resourceId->setAttribute($namespace . ':type', 'local');
+            $resourceId->nodeValue = $photoIds[$i];
+            $resourceSet->appendChild($resourceId);
+            $resourceSource = $domDoc->createElement($namespace . ':resourceSource');
+            $resourceSource->setAttribute($namespace . ':type', 'holder of image');
+            $resourceSet->appendChild($resourceSource);
+            $legalBodyName = $domDoc->createElement($namespace . ':legalBodyName');
+            $resourceSource->appendChild($legalBodyName);
+            $appellationValue = $domDoc->createElement($namespace . ':appellationValue');
+            // Hardcoded value
+            $appellationValue->nodeValue = 'Lukas, Arts in Flanders';
+            $legalBodyName->appendChild($appellationValue);
+            $rightsResource = $domDoc->createElement($namespace . ':rightsResource');
+            $resourceSet->appendChild($rightsResource);
+            $rightsType = $domDoc->createElement($namespace . ':rightsType');
+            $rightsResource->appendChild($rightsType);
+            $conceptId = $domDoc->createElement($namespace . ':conceptID');
+            $conceptId->setAttribute($namespace . ':type', 'URI');
+            $conceptId->nodeValue = $rightsStatuses[$i];
+            $term = $domDoc->createElement($namespace . ':term');
+            // Three possible hardcoded values
+            switch($rightsStatuses[$i]) {
+                case "https://creativecommons.org/publicdomain/zero/1.0/":
+                    $conceptId->setAttribute($namespace . ':source', 'Creative Commons');
+                    $term->nodeValue = 'CC0';
+                    break;
+                case "http://rightsstatements.org/vocab/InC/1.0/":
+                    $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
+                    $term->nodeValue = 'InC';
+                    break;
+                case "http://rightsstatements.org/vocab/CNE/1.0/":
+                    $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
+                    $term->nodeValue = 'CNE';
+                    break;
+                default:
+                    echo 'Error: invalid copyright status "' . $rightsStatus . '"' . PHP_EOL;
+                    break;
+            }
+            $rightsType->appendChild($conceptId);
+            $rightsType->appendChild($term);
+        }
 
         foreach ($languages as $language) {
 
