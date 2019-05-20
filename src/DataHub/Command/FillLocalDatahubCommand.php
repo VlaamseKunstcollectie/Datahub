@@ -189,104 +189,6 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultDescriptiveMetadata = $def;
         }
 
-        $relatedWorksWrap = null;
-        if(!empty($isPartsOfLine) || !empty($hasPartsLine)) {
-            $objectRelationWrap = $domDoc->createElement($namespace . ':objectRelationWrap');
-            $defaultDescriptiveMetadata->appendChild($objectRelationWrap);
-            $relatedWorksWrap = $domDoc->createElement($namespace . ':relatedWorksWrap');
-            $objectRelationWrap->appendChild($relatedWorksWrap);
-        }
-
-        if(!empty($isPartsOfLine)) {
-            $isPartsOf = explode(' ; ', $isPartsOfLine);
-            foreach($isPartsOf as $isPartOf) {
-                $dataPid = null;
-                foreach($recordInfo as $otherRecord) {
-                    if($otherRecord['workPid'] == $isPartOf) {
-                        $dataPid = $otherRecord['dataPid'];
-                        break;
-                    }
-                }
-                if($dataPid == null) {
-                    echo 'Error: parent of ' . $workPid . ' with work PID ' . $isPartOf . ' not found!' . PHP_EOL;
-                } else {
-                    $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
-                    $relatedWorksWrap->appendChild($relatedWorkSet);
-                    $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
-                    $relatedWorkSet->appendChild($relatedWork);
-                    $object = $domDoc->createElement($namespace . ':object');
-                    $relatedWork->appendChild($object);
-                    $objectID = $domDoc->createElement($namespace . ':objectID');
-                    $expl = explode(':', $dataPid);
-                    $objectID->setAttribute($namespace . ':source', '');
-                    $objectID->setAttribute($namespace . ':type', 'local');
-                    $objectID->nodeValue = $expl[count($expl) - 1];
-                    $object->appendChild($objectID);
-                    $objectID = $domDoc->createElement($namespace . ':objectID');
-                    $objectID->setAttribute($namespace . ':type', 'oai');
-                    $objectID->nodeValue = $dataPid;
-                    $object->appendChild($objectID);
-                    $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
-                    $relatedWorkSet->appendChild($relatedWorkRelType);
-                    $conceptId = $domDoc->createElement($namespace . ':conceptID');
-                    $conceptId->setAttribute($namespace . ':type', 'URI');
-                    // Hardcoded value
-                    $conceptId->nodeValue = 'http://purl.org/dc/terms/isPartOf';
-                    $relatedWorkRelType->appendChild($conceptId);
-                    $term = $domDoc->createElement($namespace . ':term');
-                    $term->setAttribute('xml:lang', 'en');
-                    // Hardcoded value
-                    $term->nodeValue = 'Is Part Of';
-                    $relatedWorkRelType->appendChild($term);
-                }
-            }
-        }
-
-        if(!empty($hasPartsLine)) {
-            $hasParts = explode(' ; ', $hasPartsLine);
-            foreach($hasParts as $hasPart) {
-                $dataPid = null;
-                foreach($recordInfo as $otherRecord) {
-                    if($otherRecord['workPid'] == $hasPart) {
-                        $dataPid = $otherRecord['dataPid'];
-                        break;
-                    }
-                }
-                if($dataPid == null) {
-                    echo 'Error: child of ' . $workPid . ' with work PID ' . $hasPart . ' not found!' . PHP_EOL;
-                } else {
-                    $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
-                    $relatedWorksWrap->appendChild($relatedWorkSet);
-                    $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
-                    $relatedWorkSet->appendChild($relatedWork);
-                    $object = $domDoc->createElement($namespace . ':object');
-                    $relatedWork->appendChild($object);
-                    $objectID = $domDoc->createElement($namespace . ':objectID');
-                    $expl = explode(':', $dataPid);
-                    $objectID->setAttribute($namespace . ':source', '');
-                    $objectID->setAttribute($namespace . ':type', 'local');
-                    $objectID->nodeValue = $expl[count($expl) - 1];
-                    $object->appendChild($objectID);
-                    $objectID = $domDoc->createElement($namespace . ':objectID');
-                    $objectID->setAttribute($namespace . ':type', 'oai');
-                    $objectID->nodeValue = $dataPid;
-                    $object->appendChild($objectID);
-                    $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
-                    $relatedWorkSet->appendChild($relatedWorkRelType);
-                    $conceptId = $domDoc->createElement($namespace . ':conceptID');
-                    $conceptId->setAttribute($namespace . ':type', 'URI');
-                    // Hardcoded value
-                    $conceptId->nodeValue = 'http://purl.org/dc/terms/hasPart';
-                    $relatedWorkRelType->appendChild($conceptId);
-                    $term = $domDoc->createElement($namespace . ':term');
-                    $term->setAttribute('xml:lang', 'en');
-                    // Hardcoded value
-                    $term->nodeValue = 'Has Part';
-                    $relatedWorkRelType->appendChild($term);
-                }
-            }
-        }
-
         $query = 'descendant::lido:administrativeMetadata';
         $defaultAdministrativeMetadata = null;
         $defaultAdministrativeMetadatas = $xpath->query($query);
@@ -294,59 +196,9 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultAdministrativeMetadata = $def;
         }
 
-        $rightsStatuses = explode(' ; ', $rightsStatusesLine);
-        $photoIds = explode(' ; ', $photoIdsLine);
-        if(count($rightsStatuses) != count($photoIds)) {
-            echo 'Error: copyright status count (' . count($rightsStatuses) . ') and photo id count (' . count($photoIds) . ') do not match!' . PHP_EOL;
-            return $domDoc;
-        }
+        $this->addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $domDoc, $defaultDescriptiveMetadata);
 
-        // Add photo id('s) and copyright status(es) to the administrative metadata
-        for($i = 0; $i < count($rightsStatuses); $i++) {
-            $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
-            $defaultAdministrativeMetadata->appendChild($resourceSet);
-            $resourceId = $domDoc->createElement($namespace . ':resourceID');
-            $resourceId->setAttribute($namespace . ':type', 'local');
-            $resourceId->nodeValue = $photoIds[$i];
-            $resourceSet->appendChild($resourceId);
-            $resourceSource = $domDoc->createElement($namespace . ':resourceSource');
-            $resourceSource->setAttribute($namespace . ':type', 'holder of image');
-            $resourceSet->appendChild($resourceSource);
-            $legalBodyName = $domDoc->createElement($namespace . ':legalBodyName');
-            $resourceSource->appendChild($legalBodyName);
-            $appellationValue = $domDoc->createElement($namespace . ':appellationValue');
-            // Hardcoded value
-            $appellationValue->nodeValue = 'Lukas, Arts in Flanders';
-            $legalBodyName->appendChild($appellationValue);
-            $rightsResource = $domDoc->createElement($namespace . ':rightsResource');
-            $resourceSet->appendChild($rightsResource);
-            $rightsType = $domDoc->createElement($namespace . ':rightsType');
-            $rightsResource->appendChild($rightsType);
-            $conceptId = $domDoc->createElement($namespace . ':conceptID');
-            $conceptId->setAttribute($namespace . ':type', 'URI');
-            $conceptId->nodeValue = $rightsStatuses[$i];
-            $term = $domDoc->createElement($namespace . ':term');
-            // Three possible hardcoded values
-            switch($rightsStatuses[$i]) {
-                case "https://creativecommons.org/publicdomain/zero/1.0/":
-                    $conceptId->setAttribute($namespace . ':source', 'Creative Commons');
-                    $term->nodeValue = 'CC0';
-                    break;
-                case "http://rightsstatements.org/vocab/InC/1.0/":
-                    $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
-                    $term->nodeValue = 'InC';
-                    break;
-                case "http://rightsstatements.org/vocab/CNE/1.0/":
-                    $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
-                    $term->nodeValue = 'CNE';
-                    break;
-                default:
-                    echo 'Error: invalid copyright status "' . $rightsStatus . '"' . PHP_EOL;
-                    break;
-            }
-            $rightsType->appendChild($conceptId);
-            $rightsType->appendChild($term);
-        }
+        $this->addPhotosAndCopyright($namespace, $rightsStatusesLine, $photoIdsLine, $domDoc, $defaultAdministrativeMetadata);
 
         foreach ($languages as $language) {
 
@@ -516,5 +368,173 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         }
         $xpath = 'descendant::' . $xpath;
         return $xpath;
+    }
+
+    private function addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $domDoc, $defaultDescriptiveMetadata)
+    {
+        $relatedWorksWrap = null;
+        if(!empty($isPartsOfLine) || !empty($hasPartsLine)) {
+            $objectRelationWrap = $domDoc->createElement($namespace . ':objectRelationWrap');
+            $defaultDescriptiveMetadata->appendChild($objectRelationWrap);
+            $relatedWorksWrap = $domDoc->createElement($namespace . ':relatedWorksWrap');
+            $objectRelationWrap->appendChild($relatedWorksWrap);
+        }
+
+        if(!empty($isPartsOfLine)) {
+            $this->addPartsOf($namespace, $recordInfo, $workPid, $isPartsOfLine, $domDoc, $relatedWorksWrap);
+        }
+
+        if(!empty($hasPartsLine)) {
+            $this->addHasParts($namespace, $recordInfo, $workPid, $hasPartsLine, $domDoc, $relatedWorksWrap);
+        }
+    }
+
+    private function addPartsOf($namespace, $recordInfo, $workPid, $isPartsOfLine, $domDoc, $relatedWorksWrap)
+    {
+        $isPartsOf = explode(' ; ', $isPartsOfLine);
+        foreach($isPartsOf as $isPartOf) {
+            $dataPid = null;
+            foreach($recordInfo as $otherRecord) {
+                if($otherRecord['workPid'] == $isPartOf) {
+                    $dataPid = $otherRecord['dataPid'];
+                    break;
+                }
+            }
+            if($dataPid == null) {
+                echo 'Error: parent of ' . $workPid . ' with work PID ' . $isPartOf . ' not found!' . PHP_EOL;
+            } else {
+                $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
+                $relatedWorksWrap->appendChild($relatedWorkSet);
+                $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
+                $relatedWorkSet->appendChild($relatedWork);
+                $object = $domDoc->createElement($namespace . ':object');
+                $relatedWork->appendChild($object);
+                $objectID = $domDoc->createElement($namespace . ':objectID');
+                $expl = explode(':', $dataPid);
+                $objectID->setAttribute($namespace . ':source', '');
+                $objectID->setAttribute($namespace . ':type', 'local');
+                $objectID->nodeValue = $expl[count($expl) - 1];
+                $object->appendChild($objectID);
+                $objectID = $domDoc->createElement($namespace . ':objectID');
+                $objectID->setAttribute($namespace . ':type', 'oai');
+                $objectID->nodeValue = $dataPid;
+                $object->appendChild($objectID);
+                $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
+                $relatedWorkSet->appendChild($relatedWorkRelType);
+                $conceptId = $domDoc->createElement($namespace . ':conceptID');
+                $conceptId->setAttribute($namespace . ':type', 'URI');
+                // Hardcoded value
+                $conceptId->nodeValue = 'http://purl.org/dc/terms/isPartOf';
+                $relatedWorkRelType->appendChild($conceptId);
+                $term = $domDoc->createElement($namespace . ':term');
+                $term->setAttribute('xml:lang', 'en');
+                // Hardcoded value
+                $term->nodeValue = 'Is Part Of';
+                $relatedWorkRelType->appendChild($term);
+            }
+        }
+    }
+
+    private function addHasParts($namespace, $recordInfo, $workPid, $hasPartsLine, $domDoc, $relatedWorksWrap)
+    {
+        $hasParts = explode(' ; ', $hasPartsLine);
+        foreach($hasParts as $hasPart) {
+            $dataPid = null;
+            foreach($recordInfo as $otherRecord) {
+                if($otherRecord['workPid'] == $hasPart) {
+                    $dataPid = $otherRecord['dataPid'];
+                    break;
+                }
+            }
+            if($dataPid == null) {
+                echo 'Error: child of ' . $workPid . ' with work PID ' . $hasPart . ' not found!' . PHP_EOL;
+            } else {
+                $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
+                $relatedWorksWrap->appendChild($relatedWorkSet);
+                $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
+                $relatedWorkSet->appendChild($relatedWork);
+                $object = $domDoc->createElement($namespace . ':object');
+                $relatedWork->appendChild($object);
+                $objectID = $domDoc->createElement($namespace . ':objectID');
+                $expl = explode(':', $dataPid);
+                $objectID->setAttribute($namespace . ':source', '');
+                $objectID->setAttribute($namespace . ':type', 'local');
+                $objectID->nodeValue = $expl[count($expl) - 1];
+                $object->appendChild($objectID);
+                $objectID = $domDoc->createElement($namespace . ':objectID');
+                $objectID->setAttribute($namespace . ':type', 'oai');
+                $objectID->nodeValue = $dataPid;
+                $object->appendChild($objectID);
+                $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
+                $relatedWorkSet->appendChild($relatedWorkRelType);
+                $conceptId = $domDoc->createElement($namespace . ':conceptID');
+                $conceptId->setAttribute($namespace . ':type', 'URI');
+                // Hardcoded value
+                $conceptId->nodeValue = 'http://purl.org/dc/terms/hasPart';
+                $relatedWorkRelType->appendChild($conceptId);
+                $term = $domDoc->createElement($namespace . ':term');
+                $term->setAttribute('xml:lang', 'en');
+                // Hardcoded value
+                $term->nodeValue = 'Has Part';
+                $relatedWorkRelType->appendChild($term);
+            }
+        }
+    }
+
+    private function addPhotosAndCopyright($namespace, $rightsStatusesLine, $photoIdsLine, $domDoc, $defaultAdministrativeMetadata)
+    {
+        $rightsStatuses = explode(' ; ', $rightsStatusesLine);
+        $photoIds = explode(' ; ', $photoIdsLine);
+        if(count($rightsStatuses) != count($photoIds)) {
+            echo 'Error: copyright status count (' . count($rightsStatuses) . ') and photo id count (' . count($photoIds) . ') do not match!' . PHP_EOL;
+            return $domDoc;
+        }
+
+        // Add photo id('s) and copyright status(es) to the administrative metadata
+        for($i = 0; $i < count($rightsStatuses); $i++) {
+            $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
+            $defaultAdministrativeMetadata->appendChild($resourceSet);
+            $resourceId = $domDoc->createElement($namespace . ':resourceID');
+            $resourceId->setAttribute($namespace . ':type', 'local');
+            $resourceId->nodeValue = $photoIds[$i];
+            $resourceSet->appendChild($resourceId);
+            $resourceSource = $domDoc->createElement($namespace . ':resourceSource');
+            $resourceSource->setAttribute($namespace . ':type', 'holder of image');
+            $resourceSet->appendChild($resourceSource);
+            $legalBodyName = $domDoc->createElement($namespace . ':legalBodyName');
+            $resourceSource->appendChild($legalBodyName);
+            $appellationValue = $domDoc->createElement($namespace . ':appellationValue');
+            // Hardcoded value
+            $appellationValue->nodeValue = 'Lukas, Arts in Flanders';
+            $legalBodyName->appendChild($appellationValue);
+            $rightsResource = $domDoc->createElement($namespace . ':rightsResource');
+            $resourceSet->appendChild($rightsResource);
+            $rightsType = $domDoc->createElement($namespace . ':rightsType');
+            $rightsResource->appendChild($rightsType);
+            $conceptId = $domDoc->createElement($namespace . ':conceptID');
+            $conceptId->setAttribute($namespace . ':type', 'URI');
+            $conceptId->nodeValue = $rightsStatuses[$i];
+            $term = $domDoc->createElement($namespace . ':term');
+            // Three possible hardcoded values
+            switch($rightsStatuses[$i]) {
+                case "https://creativecommons.org/publicdomain/zero/1.0/":
+                    $conceptId->setAttribute($namespace . ':source', 'Creative Commons');
+                    $term->nodeValue = 'CC0';
+                    break;
+                case "http://rightsstatements.org/vocab/InC/1.0/":
+                    $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
+                    $term->nodeValue = 'InC';
+                    break;
+                case "http://rightsstatements.org/vocab/CNE/1.0/":
+                    $conceptId->setAttribute($namespace . ':source', 'rightsstatements.org');
+                    $term->nodeValue = 'CNE';
+                    break;
+                default:
+                    echo 'Error: invalid copyright status "' . $rightsStatuses[$i] . '"' . PHP_EOL;
+                    break;
+            }
+            $rightsType->appendChild($conceptId);
+            $rightsType->appendChild($term);
+        }
     }
 }
