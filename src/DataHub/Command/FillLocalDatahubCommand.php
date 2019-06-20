@@ -89,7 +89,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     $data = $rec->GetRecord->record->metadata->children($namespace, true);
 
                     //Fetch the data from this record based on data_definition in data_import.yml
-                    $newData = $this->alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $record['workPid'], $record['isPartOf'], $record['hasPart'], $record['copyrightStatus'], $record['lukasPhotoId']);
+                    $newData = $this->alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $record['workPid'], $record['isPartOf'], $record['hasPart'], $record['relatedTo'], $record['xml:sortorder'], $record['copyrightStatus'], $record['lukasPhotoId']);
 
                     $doc = new \DOMDocument();
                     $doc->formatOutput = true;
@@ -173,7 +173,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
     }
 
     // Remove old nodes and insert new nodes, or translate nodes where applicable
-    private function alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $workPid, $isPartsOfLine, $hasPartsLine, $rightsStatusesLine, $photoIdsLine)
+    private function alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $rightsStatusesLine, $photoIdsLine)
     {
         // Create a new DOMDocument based on the data we retrieved from the remote Datahub
         $domDoc = new DOMDocument;
@@ -196,7 +196,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultAdministrativeMetadata = $def;
         }
 
-        $this->addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $domDoc, $defaultDescriptiveMetadata);
+        $this->addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $defaultDescriptiveMetadata);
 
         $this->addPhotosAndCopyright($namespace, $rightsStatusesLine, $photoIdsLine, $domDoc, $defaultAdministrativeMetadata);
 
@@ -373,10 +373,10 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         return $xpath;
     }
 
-    private function addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $domDoc, $defaultDescriptiveMetadata)
+    private function addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $defaultDescriptiveMetadata)
     {
         $relatedWorksWrap = null;
-        if(!empty($isPartsOfLine) || !empty($hasPartsLine)) {
+        if(!empty($isPartsOfLine) || !empty($hasPartsLine) || !empty($relatedToLine)) {
             $objectRelationWrap = $domDoc->createElement($namespace . ':objectRelationWrap');
             $defaultDescriptiveMetadata->appendChild($objectRelationWrap);
             $relatedWorksWrap = $domDoc->createElement($namespace . ':relatedWorksWrap');
@@ -384,29 +384,36 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         }
 
         if(!empty($isPartsOfLine)) {
-            $this->addPartsOf($namespace, $recordInfo, $workPid, $isPartsOfLine, $domDoc, $relatedWorksWrap);
+            $this->addRelatedSet($namespace, $recordInfo, $workPid, $isPartsOfLine, $sortOrderLine, 'parent', 'http://purl.org/dc/terms/isPartOf', 'Is Part Of', $domDoc, $relatedWorksWrap);
         }
 
         if(!empty($hasPartsLine)) {
-            $this->addHasParts($namespace, $recordInfo, $workPid, $hasPartsLine, $domDoc, $relatedWorksWrap);
+            $this->addRelatedSet($namespace, $recordInfo, $workPid, $hasPartsLine, $sortOrderLine, 'child', 'http://purl.org/dc/terms/hasPart', 'Has Part', $domDoc, $relatedWorksWrap);
+        }
+
+        if(!empty($relatedToLine)) {
+            $this->addRelatedSet($namespace, $recordInfo, $workPid, $relatedToLine, $sortOrderLine, 'relation', 'http://purl.org/dc/terms/relation', 'Relation', $domDoc, $relatedWorksWrap);
         }
     }
 
-    private function addPartsOf($namespace, $recordInfo, $workPid, $isPartsOfLine, $domDoc, $relatedWorksWrap)
+    private function addRelatedSet($namespace, $recordInfo, $workPid, $line, $sortOrder, $relation, $purlId, $purlTerm, $domDoc, $relatedWorksWrap)
     {
-        $isPartsOf = explode(' ; ', $isPartsOfLine);
-        foreach($isPartsOf as $isPartOf) {
+        $splitLine = explode(' ; ', $line);
+        foreach($splitLine as $linePart) {
             $dataPid = null;
             foreach($recordInfo as $otherRecord) {
-                if($otherRecord['workPid'] == $isPartOf) {
+                if($otherRecord['workPid'] == $linePart) {
                     $dataPid = $otherRecord['dataPid'];
                     break;
                 }
             }
             if($dataPid == null) {
-                echo 'Error: parent of ' . $workPid . ' with work PID ' . $isPartOf . ' not found!' . PHP_EOL;
+                echo 'Error: ' . $relation . ' of ' . $workPid . ' with work PID ' . $linePart . ' not found!' . PHP_EOL;
             } else {
                 $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
+                if(!empty($sortOrder)) {
+                    $relatedWorkSet->setAttribute('xml:sortorder', $sortOrder);
+                }
                 $relatedWorksWrap->appendChild($relatedWorkSet);
                 $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
                 $relatedWorkSet->appendChild($relatedWork);
@@ -427,58 +434,12 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 $conceptId = $domDoc->createElement($namespace . ':conceptID');
                 $conceptId->setAttribute($namespace . ':type', 'URI');
                 // Hardcoded value
-                $conceptId->nodeValue = 'http://purl.org/dc/terms/isPartOf';
+                $conceptId->nodeValue = $purlId;
                 $relatedWorkRelType->appendChild($conceptId);
                 $term = $domDoc->createElement($namespace . ':term');
                 $term->setAttribute('xml:lang', 'en');
                 // Hardcoded value
-                $term->nodeValue = 'Is Part Of';
-                $relatedWorkRelType->appendChild($term);
-            }
-        }
-    }
-
-    private function addHasParts($namespace, $recordInfo, $workPid, $hasPartsLine, $domDoc, $relatedWorksWrap)
-    {
-        $hasParts = explode(' ; ', $hasPartsLine);
-        foreach($hasParts as $hasPart) {
-            $dataPid = null;
-            foreach($recordInfo as $otherRecord) {
-                if($otherRecord['workPid'] == $hasPart) {
-                    $dataPid = $otherRecord['dataPid'];
-                    break;
-                }
-            }
-            if($dataPid == null) {
-                echo 'Error: child of ' . $workPid . ' with work PID ' . $hasPart . ' not found!' . PHP_EOL;
-            } else {
-                $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
-                $relatedWorksWrap->appendChild($relatedWorkSet);
-                $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
-                $relatedWorkSet->appendChild($relatedWork);
-                $object = $domDoc->createElement($namespace . ':object');
-                $relatedWork->appendChild($object);
-                $objectID = $domDoc->createElement($namespace . ':objectID');
-                $expl = explode(':', $dataPid);
-                $objectID->setAttribute($namespace . ':source', '');
-                $objectID->setAttribute($namespace . ':type', 'local');
-                $objectID->nodeValue = $expl[count($expl) - 1];
-                $object->appendChild($objectID);
-                $objectID = $domDoc->createElement($namespace . ':objectID');
-                $objectID->setAttribute($namespace . ':type', 'oai');
-                $objectID->nodeValue = $dataPid;
-                $object->appendChild($objectID);
-                $relatedWorkRelType = $domDoc->createElement($namespace . ':relatedWorkRelType');
-                $relatedWorkSet->appendChild($relatedWorkRelType);
-                $conceptId = $domDoc->createElement($namespace . ':conceptID');
-                $conceptId->setAttribute($namespace . ':type', 'URI');
-                // Hardcoded value
-                $conceptId->nodeValue = 'http://purl.org/dc/terms/hasPart';
-                $relatedWorkRelType->appendChild($conceptId);
-                $term = $domDoc->createElement($namespace . ':term');
-                $term->setAttribute('xml:lang', 'en');
-                // Hardcoded value
-                $term->nodeValue = 'Has Part';
+                $term->nodeValue = $purlTerm;
                 $relatedWorkRelType->appendChild($term);
             }
         }
