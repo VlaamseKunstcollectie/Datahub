@@ -98,14 +98,25 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     $doc->getElementsByTagName("lidoRecID")->item(0)->nodeValue = $dataPid;
                     $raw = $doc->saveXML();
 
-                    $record = new Record();
-                    $record->setRecordIds(array($dataPid));
-                    $record->setObjectIds(array());
-                    $record->setRaw($raw);
+                    $converter = $this->getContainer()->get("datahub.resource.builder.converter.factory")->getConverter();
+                    $valid = false;
+                    try {
+                        $converter->read($raw);
+                        $valid = true;
+                    } catch (\Exception $e) {
+                        echo $dataPid . ' invalid XML: ' . $e->getMessage() . PHP_EOL;
+                    }
 
-                    $manager = $this->getContainer()->get('doctrine_mongodb')->getManager();
-                    $manager->persist($record);
-                    $manager->flush();
+                    if($valid) {
+                        $record = new Record();
+                        $record->setRecordIds(array($dataPid));
+                        $record->setObjectIds(array());
+                        $record->setRaw($raw);
+
+                        $manager = $this->getContainer()->get('doctrine_mongodb')->getManager();
+                        $manager->persist($record);
+                        $manager->flush();
+                    }
                 }
             }
             catch(OaipmhException $e) {
@@ -197,9 +208,9 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultAdministrativeMetadata = $def;
         }
 
-        $this->addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $defaultDescriptiveMetadata);
+        $this->addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $xpath, $defaultDescriptiveMetadata);
 
-        $this->addPhotosAndCopyright($namespace, $rightsStatusesLine, $vkcIdsLine, $domDoc, $defaultAdministrativeMetadata);
+        $this->addPhotosAndCopyright($namespace, $rightsStatusesLine, $vkcIdsLine, $domDoc, $xpath, $defaultAdministrativeMetadata);
 
         foreach ($languages as $language) {
 
@@ -253,17 +264,13 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                                 }
                             }
 
-                            $newValue = null;
+                            $newValue = '';
                             // Find the correct value for this work PID
                             foreach ($translations[$key] as $translation) {
                                 if ($translation['Work PID'] == $workPid) {
                                     $newValue = $translation[$language];
                                 }
                             }
-                            if($newValue == null)
-                                continue;
-                            if(empty($newValue))
-                                continue;
 
                             $newValue = str_replace('\\', '', $newValue);
 
@@ -285,20 +292,24 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                             // Insert new child node in the right place by searching for any elements that come after it
                             $newEle = $domDoc->createElement($namespace . ':' . $children[0]);
                             $added = false;
-                            if (count($before) > 0) {
-                                // Loop through all child nodes to find the right index where to insert it
-                                foreach ($childNodes as $childNode) {
-                                    $insert = false;
-                                    foreach ($before as $bef) {
-                                        if ($childNode->nodeName == $bef) {
-                                            $insert = true;
-                                            break;
-                                        }
+                            // Loop through all child nodes to find the right index where to insert it
+                            foreach ($childNodes as $childNode) {
+                                if(empty($before)) {
+                                    $domNode->insertBefore($newEle, $childNode);
+                                    $added = true;
+                                    break;
+                                }
+                                $insert = false;
+                                foreach ($before as $bef) {
+                                    if ($childNode->nodeName == $bef) {
+                                        $insert = true;
+                                        break;
                                     }
-                                    if ($insert) {
-                                        $domNode->insertBefore($newEle, $childNode);
-                                        $added = true;
-                                    }
+                                }
+                                if ($insert) {
+                                    $domNode->insertBefore($newEle, $childNode);
+                                    $added = true;
+                                    break;
                                 }
                             }
 
@@ -374,12 +385,22 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         return $xpath;
     }
 
-    private function addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $defaultDescriptiveMetadata)
+    private function addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $xpath, $defaultDescriptiveMetadata)
     {
         $relatedWorksWrap = null;
         if(!empty($isPartsOfLine) || !empty($hasPartsLine) || !empty($relatedToLine)) {
-            $objectRelationWrap = $domDoc->createElement($namespace . ':objectRelationWrap');
-            $defaultDescriptiveMetadata->appendChild($objectRelationWrap);
+
+            $query = 'descendant::lido:descriptiveMetadata/lido:objectRelationWrap';
+            $objectRelationWrap = null;
+            $objectRelationWraps = $xpath->query($query);
+            foreach($objectRelationWraps as $wrap) {
+                $objectRelationWrap = $wrap;
+            }
+
+            if($objectRelationWrap == null) {
+                $objectRelationWrap = $domDoc->createElement($namespace . ':objectRelationWrap');
+                $defaultDescriptiveMetadata->appendChild($objectRelationWrap);
+            }
             $relatedWorksWrap = $domDoc->createElement($namespace . ':relatedWorksWrap');
             $objectRelationWrap->appendChild($relatedWorksWrap);
         }
@@ -413,7 +434,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             } else {
                 $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
                 if(!empty($sortOrder)) {
-                    $relatedWorkSet->setAttribute('xml:sortorder', $sortOrder);
+                    $relatedWorkSet->setAttribute('lido:sortorder', $sortOrder);
                 }
                 $relatedWorksWrap->appendChild($relatedWorkSet);
                 $relatedWork = $domDoc->createElement($namespace . ':relatedWork');
@@ -446,7 +467,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         }
     }
 
-    private function addPhotosAndCopyright($namespace, $rightsStatusesLine, $vkcIdsLine, $domDoc, $defaultAdministrativeMetadata)
+    private function addPhotosAndCopyright($namespace, $rightsStatusesLine, $vkcIdsLine, $domDoc, $xpath, $defaultAdministrativeMetadata)
     {
         $rightsStatuses = explode(' ; ', $rightsStatusesLine);
         $vkcIds = explode(' ; ', $vkcIdsLine);
@@ -455,10 +476,22 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             return $domDoc;
         }
 
+        $query = 'descendant::lido:administrativeMetadata/lido:resourceWrap';
+        $resourceWrap = null;
+        $resourceWraps = $xpath->query($query);
+        foreach($resourceWraps as $wrap) {
+            $resourceWrap = $wrap;
+        }
+
+        if($resourceWrap == null) {
+            $resourceWrap = $domDoc->createElement($namespace . ':resourceWrap');
+            $defaultAdministrativeMetadata->appendChild($resourceWrap);
+        }
+
         // Add photo id('s) and copyright status(es) to the administrative metadata
         for($i = 0; $i < count($rightsStatuses); $i++) {
             $resourceSet = $domDoc->createElement($namespace . ':resourceSet');
-            $defaultAdministrativeMetadata->appendChild($resourceSet);
+            $resourceWrap->appendChild($resourceSet);
             $resourceId = $domDoc->createElement($namespace . ':resourceID');
             $resourceId->setAttribute($namespace . ':type', 'local');
             $resourceId->nodeValue = $vkcIds[$i];
