@@ -89,7 +89,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     $data = $rec->GetRecord->record->metadata->children($namespace, true);
 
                     //Fetch the data from this record based on data_definition in data_import.yml
-                    $newData = $this->alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $record['workPid'], $record['isPartOf'], $record['hasPart'], $record['relatedTo'], $record['xml:sortorder'], $record['copyrightStatus'], $record['lukasPhotoId']);
+                    $newData = $this->alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $record['workPid'], $record['isPartOf'], $record['hasPart'], $record['relatedTo'], $record['xml:sortorder'], $record['copyrightStatus'], $record['vkcId']);
 
                     $doc = new \DOMDocument();
                     $doc->formatOutput = true;
@@ -132,6 +132,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     if($csv[$j]['workPid'] == $line['workPid']) {
                         $csv[$j]['copyrightStatus'] = $csv[$j]['copyrightStatus'] . ' ; ' . $line['copyrightStatus'];
                         $csv[$j]['lukasPhotoId'] = $csv[$j]['lukasPhotoId'] . ' ; ' . $line['lukasPhotoId'];
+                        $csv[$j]['vkcId'] = $csv[$j]['vkcId'] . ' ; ' . $line['vkcId'];
                         $add = false;
                         break;
                     }
@@ -173,7 +174,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
     }
 
     // Remove old nodes and insert new nodes, or translate nodes where applicable
-    private function alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $rightsStatusesLine, $photoIdsLine)
+    private function alterData($dataDef, $namespace, $languages, $translations, $recordInfo, $data, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $rightsStatusesLine, $vkcIdsLine)
     {
         // Create a new DOMDocument based on the data we retrieved from the remote Datahub
         $domDoc = new DOMDocument;
@@ -198,7 +199,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
 
         $this->addRelatedWorksWrap($namespace, $recordInfo, $workPid, $isPartsOfLine, $hasPartsLine, $relatedToLine, $sortOrderLine, $domDoc, $defaultDescriptiveMetadata);
 
-        $this->addPhotosAndCopyright($namespace, $rightsStatusesLine, $photoIdsLine, $domDoc, $defaultAdministrativeMetadata);
+        $this->addPhotosAndCopyright($namespace, $rightsStatusesLine, $vkcIdsLine, $domDoc, $defaultAdministrativeMetadata);
 
         foreach ($languages as $language) {
 
@@ -445,12 +446,12 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         }
     }
 
-    private function addPhotosAndCopyright($namespace, $rightsStatusesLine, $photoIdsLine, $domDoc, $defaultAdministrativeMetadata)
+    private function addPhotosAndCopyright($namespace, $rightsStatusesLine, $vkcIdsLine, $domDoc, $defaultAdministrativeMetadata)
     {
         $rightsStatuses = explode(' ; ', $rightsStatusesLine);
-        $photoIds = explode(' ; ', $photoIdsLine);
-        if(count($rightsStatuses) != count($photoIds)) {
-            echo 'Error: copyright status count (' . count($rightsStatuses) . ') and photo id count (' . count($photoIds) . ') do not match!' . PHP_EOL;
+        $vkcIds = explode(' ; ', $vkcIdsLine);
+        if(count($rightsStatuses) != count($vkcIds)) {
+            echo 'Error: copyright status count (' . count($rightsStatuses) . ') and VKC id count (' . count($vkcIds) . ') do not match!' . PHP_EOL;
             return $domDoc;
         }
 
@@ -460,7 +461,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $defaultAdministrativeMetadata->appendChild($resourceSet);
             $resourceId = $domDoc->createElement($namespace . ':resourceID');
             $resourceId->setAttribute($namespace . ':type', 'local');
-            $resourceId->nodeValue = $photoIds[$i];
+            $resourceId->nodeValue = $vkcIds[$i];
             $resourceSet->appendChild($resourceId);
             $resourceSource = $domDoc->createElement($namespace . ':resourceSource');
             $resourceSource->setAttribute($namespace . ':type', 'holder of image');
