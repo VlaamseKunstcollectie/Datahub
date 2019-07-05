@@ -423,9 +423,11 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         $splitLine = explode(' ; ', $line);
         foreach($splitLine as $linePart) {
             $dataPid = null;
+            $sortOrder = null;
             foreach($recordInfo as $otherRecord) {
                 if($otherRecord['workPid'] == $linePart) {
                     $dataPid = $otherRecord['dataPid'];
+                    $sortOrder = $otherRecord['xml:sortorder'];
                     break;
                 }
             }
