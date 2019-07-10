@@ -95,7 +95,6 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     $doc->formatOutput = true;
                     $doc->loadXML($newData);
 
-                    $doc->getElementsByTagName("lidoRecID")->item(0)->nodeValue = $dataPid;
                     $raw = $doc->saveXML();
 
                     $converter = $this->getContainer()->get("datahub.resource.builder.converter.factory")->getConverter();
