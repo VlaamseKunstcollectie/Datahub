@@ -13,6 +13,7 @@ use DataHub\ResourceAPIBundle\Document\Record;
 use DOMDocument;
 use DOMXPath;
 use Phpoaipmh\Endpoint;
+use Phpoaipmh\Exception\HttpException;
 use Phpoaipmh\Exception\OaipmhException;
 use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
 use Symfony\Component\Console\Input\InputArgument;
@@ -21,6 +22,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 class FillLocalDatahubCommand extends ContainerAwareCommand
 {
+    private $verbose;
+    private $logger;
+
     protected function configure()
     {
         $this
@@ -33,12 +37,13 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
 
     protected function execute(InputInterface $input, OutputInterface $output)
     {
+        $this->logger = $this->getContainer()->get('logger');
         $url = $input->getArgument("url");
         if(!$url) {
             $url = $this->getContainer()->getParameter('remote_datahub_url');
         }
 
-        $verbose = $input->getOption('verbose');
+        $this->verbose = $input->getOption('verbose');
 
         $namespace = $this->getContainer()->getParameter('datahub.namespace');
         $metadataPrefix = $this->getContainer()->getParameter('datahub.metadataprefix');
@@ -74,15 +79,20 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         // Build the OAI-PMH client
         $myEndpoint = Endpoint::build($url);
 
+        $totalProcessed = 0;
+        $totalSuccess = 0;
         foreach($recordInfo as $record) {
 
             try {
                 $dataPid = $record['dataPid'];
+                if($this->verbose) {
+                    $this->logger->info('Processing ' . $dataPid);
+                }
 
                 $recordRepository = $this->getContainer()->get('datahub.resource_api.repository.default');
                 $oldRecord = $recordRepository->findOneByProperty('recordIds', $dataPid);
                 if ($oldRecord instanceof Record) {
-                    echo 'Record with ID ' . $dataPid . ' already exists.' . PHP_EOL;
+                    $this->logger->error('Error: record with ID ' . $dataPid . ' already exists.');
                 } else {
                     $rec = $myEndpoint->getRecord($dataPid, $metadataPrefix);
 
@@ -103,7 +113,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                         $converter->read($raw);
                         $valid = true;
                     } catch (\Exception $e) {
-                        echo $dataPid . ' invalid XML: ' . $e->getMessage() . PHP_EOL;
+                        $this->logger->error($dataPid . ' invalid XML: ' . $e->getMessage());
                     }
 
                     if($valid) {
@@ -115,12 +125,24 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                         $manager = $this->getContainer()->get('doctrine_mongodb')->getManager();
                         $manager->persist($record);
                         $manager->flush();
+                        if($this->verbose) {
+                            $this->logger->info('Stored ' . $dataPid);
+                        }
+                        $totalSuccess++;
                     }
                 }
+                $totalProcessed++;
             }
             catch(OaipmhException $e) {
-                echo $e->getMessage() . PHP_EOL;
+                $this->logger->error($e->getMessage());
             }
+            catch(HttpException $e) {
+                $this->logger->error($e->getMessage());
+                break;
+            }
+        }
+        if($this->verbose) {
+            $this->logger->info('Done, processed ' . $totalProcessed . ' records, stored ' . $totalSuccess . ' successfully.');
         }
     }
 
@@ -132,7 +154,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
             $columns = fgetcsv($handle, 1000, ",");
             while (($row = fgetcsv($handle, 1000, ",")) !== false) {
                 if(count($columns) != count($row)) {
-                    echo 'Wrong column count: should be ' . count($columns) . ', is ' . count($row) . ' at row ' . $i;
+                    $this->logger->error('Wrong column count: should be ' . count($columns) . ', is ' . count($row) . ' at row ' . $i);
                 }
                 $line = array_combine($columns, $row);
                 $add = true;
@@ -431,7 +453,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                 }
             }
             if($dataPid == null) {
-                echo 'Error: ' . $relation . ' of ' . $workPid . ' with work PID ' . $linePart . ' not found!' . PHP_EOL;
+                $this->logger->error('Error: ' . $relation . ' of ' . $workPid . ' with work PID ' . $linePart . ' not found!');
             } else {
                 $relatedWorkSet = $domDoc->createElement($namespace . ':relatedWorkSet');
                 if(!empty($sortOrder)) {
@@ -473,7 +495,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
         $rightsStatuses = explode(' ; ', $rightsStatusesLine);
         $vkcIds = explode(' ; ', $vkcIdsLine);
         if(count($rightsStatuses) != count($vkcIds)) {
-            echo 'Error: copyright status count (' . count($rightsStatuses) . ') and VKC id count (' . count($vkcIds) . ') do not match!' . PHP_EOL;
+            $this->logger->error('Error: copyright status count (' . count($rightsStatuses) . ') and VKC id count (' . count($vkcIds) . ') do not match!');
             return $domDoc;
         }
 
@@ -529,7 +551,7 @@ class FillLocalDatahubCommand extends ContainerAwareCommand
                     $term->nodeValue = 'CNE';
                     break;
                 default:
-                    echo 'Error: invalid copyright status "' . $rightsStatuses[$i] . '"' . PHP_EOL;
+                    $this->logger->error('Error: invalid copyright status "' . $rightsStatuses[$i] . '"');
                     break;
             }
             $rightsType->appendChild($conceptId);
